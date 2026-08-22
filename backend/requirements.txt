@@ -1,0 +1,12 @@
+# Phase 1 — core environment
+fastapi
+uvicorn[standard]
+sqlalchemy
+python-dotenv
+pydantic
+pydantic-settings
+
+# Testing
+pytest
+pytest-asyncio
+httpx
