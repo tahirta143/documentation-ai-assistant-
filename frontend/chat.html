@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chat — Documentation Assistant</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&JetBrains+Mono&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/base.css">
+  <link rel="stylesheet" href="/static/css/layout.css">
+  <link rel="stylesheet" href="/static/css/components.css">
+  <link rel="stylesheet" href="/static/css/chat.css">
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Sidebar -->
+  <aside class="sidebar" role="navigation" aria-label="Main navigation">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-icon" aria-hidden="true">📚</div>
+      <div class="sidebar-logo-text">Docs Assistant<span>AI-powered Q&amp;A</span></div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-section-label">Main</div>
+      <a href="/static/index.html" class="nav-link"><span class="nav-icon">🏠</span> Dashboard</a>
+      <a href="/static/documents.html" class="nav-link"><span class="nav-icon">📁</span> Documents</a>
+      <a href="/static/chat.html" class="nav-link active" aria-current="page"><span class="nav-icon">💬</span> Chat</a>
+
+      <div class="nav-section-label" style="margin-top:var(--space-4);">History</div>
+      <div id="conversationsList" style="overflow-y:auto; max-height:300px;"></div>
+      <button id="newChatBtn" class="nav-link" style="background:rgba(79,70,229,0.2);color:#c7d2fe;cursor:pointer;border:none;width:100%;text-align:left;margin-top:var(--space-2);">
+        <span class="nav-icon">+</span> New Chat
+      </button>
+    </nav>
+  </aside>
+
+  <!-- Chat shell -->
+  <div class="chat-shell">
+    <header class="chat-header">
+      <div>
+        <div class="chat-header-title" id="chatTitle">New Conversation</div>
+        <div class="chat-header-meta" id="chatMeta">Ask anything about your documents</div>
+      </div>
+      <div style="display:flex;gap:var(--space-2);">
+        <button class="btn btn-outline btn-sm" id="clearChatBtn">New Chat</button>
+        <a href="/static/documents.html" class="btn btn-outline btn-sm">📁 Documents</a>
+      </div>
+    </header>
+
+    <!-- Message feed -->
+    <div class="chat-feed" id="chatFeed" aria-live="polite" aria-label="Conversation messages">
+      <!-- Welcome message -->
+      <div class="message assistant" id="welcomeMsg">
+        <div class="message-avatar" aria-hidden="true">AI</div>
+        <div class="message-body">
+          <div class="message-bubble">
+            <p><strong>Hello! I'm your Documentation Assistant.</strong></p>
+            <p>Ask me anything about your uploaded documents. I'll answer only from your content and show you the sources.</p>
+            <p style="color:var(--color-text-muted);font-size:var(--text-sm);margin-top:var(--space-3);">
+              💡 Make sure you have <a href="/static/documents.html">uploaded documents</a> first.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Input bar -->
+    <div class="chat-input-bar">
+      <div class="chat-input-wrap">
+        <textarea id="chatInput" rows="1" placeholder="Ask a question about your documents…"
+                  aria-label="Chat message input"></textarea>
+        <button class="chat-send-btn" id="sendBtn" aria-label="Send message" disabled>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+        </button>
+      </div>
+      <p class="chat-input-hint">Answers are grounded in your documentation only.</p>
+    </div>
+  </div>
+
+</div>
+
+<script type="module">
+  import { chat, documents } from '/static/js/api.js';
+  import { escapeHtml, formatDateTime, renderMarkdown, toast } from '/static/js/utils.js';
+
+  let currentConversationId = null;
+  const feed     = document.getElementById('chatFeed');
+  const input    = document.getElementById('chatInput');
+  const sendBtn  = document.getElementById('sendBtn');
+  const titleEl  = document.getElementById('chatTitle');
+  const metaEl   = document.getElementById('chatMeta');
+
+  // ---- Auto-resize textarea -----------------------------------
+  input.addEventListener('input', () => {
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 160) + 'px';
+    sendBtn.disabled = !input.value.trim();
+  });
+
+  // ---- Send on Enter (Shift+Enter = newline) ------------------
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doSend(); }
+  });
+
+  sendBtn.addEventListener('click', doSend);
+
+  async function doSend() {
+    const question = input.value.trim();
+    if (!question) return;
+
+    input.value = '';
+    input.style.height = 'auto';
+    sendBtn.disabled = true;
+
+    // Hide welcome message on first send
+    document.getElementById('welcomeMsg')?.remove();
+
+    appendUserBubble(question);
+    const thinkingEl = appendThinking();
+
+    try {
+      const res = await chat.send(question, currentConversationId);
+      thinkingEl.remove();
+
+      currentConversationId = res.conversation_id;
+      titleEl.textContent = question.slice(0, 50) + (question.length > 50 ? '…' : '');
+      metaEl.textContent  = `Conversation #${res.conversation_id}`;
+
+      appendAssistantBubble(res.answer, res.sources || []);
+      loadConversations();
+    } catch (err) {
+      thinkingEl.remove();
+      appendErrorBubble(err.message);
+    }
+  }
+
+  // ---- Bubble builders ----------------------------------------
+  function appendUserBubble(text) {
+    const el = document.createElement('div');
+    el.className = 'message user';
+    el.setAttribute('role', 'article');
+    el.setAttribute('aria-label', 'Your message');
+    el.innerHTML = `
+      <div class="message-avatar" aria-hidden="true">You</div>
+      <div class="message-body">
+        <div class="message-bubble">${escapeHtml(text)}</div>
+        <div class="message-time">${formatDateTime(new Date().toISOString())}</div>
+      </div>`;
+    feed.appendChild(el);
+    scrollToBottom();
+  }
+
+  function appendAssistantBubble(answer, sources) {
+    const isNoContext = answer.includes("I don't have this information");
+    const el = document.createElement('div');
+    el.className = 'message assistant';
+    el.setAttribute('role', 'article');
+    el.setAttribute('aria-label', 'Assistant response');
+
+    const sourcesHtml = sources.length > 0 ? `
+      <div class="sources-section">
+        <div class="sources-label">Sources (${sources.length})</div>
+        <div class="sources-list">
+          ${sources.map(s => `
+            <span class="source-badge" title="Score: ${s.score}">
+              📄 ${escapeHtml(s.filename)}${s.page_number ? ` p.${s.page_number}` : ''}
+              <span class="score">${(s.score * 100).toFixed(0)}%</span>
+            </span>`).join('')}
+        </div>
+      </div>` : '';
+
+    const noContextBanner = isNoContext ? `
+      <div class="no-context-banner">
+        ⚠️ The answer was not found in your documents. Try uploading relevant files.
+      </div>` : '';
+
+    el.innerHTML = `
+      <div class="message-avatar" aria-hidden="true">AI</div>
+      <div class="message-body">
+        <div class="message-bubble">${renderMarkdown(answer)}</div>
+        ${noContextBanner}
+        ${sourcesHtml}
+        <div class="message-time">${formatDateTime(new Date().toISOString())}</div>
+      </div>`;
+    feed.appendChild(el);
+    scrollToBottom();
+  }
+
+  function appendThinking() {
+    const el = document.createElement('div');
+    el.className = 'message assistant';
+    el.setAttribute('aria-label', 'Assistant is thinking');
+    el.innerHTML = `
+      <div class="message-avatar" aria-hidden="true">AI</div>
+      <div class="message-body">
+        <div class="message-bubble">
+          <div class="thinking" aria-label="Loading">
+            <span></span><span></span><span></span>
+          </div>
+        </div>
+      </div>`;
+    feed.appendChild(el);
+    scrollToBottom();
+    return el;
+  }
+
+  function appendErrorBubble(message) {
+    const el = document.createElement('div');
+    el.className = 'message assistant';
+    el.innerHTML = `
+      <div class="message-avatar" aria-hidden="true">AI</div>
+      <div class="message-body">
+        <div class="message-bubble" style="border-color:var(--color-danger);">
+          <span style="color:var(--color-danger);">⚠️ Error: ${escapeHtml(message)}</span>
+        </div>
+      </div>`;
+    feed.appendChild(el);
+    scrollToBottom();
+  }
+
+  function scrollToBottom() {
+    feed.scrollTop = feed.scrollHeight;
+  }
+
+  // ---- New chat ------------------------------------------------
+  function resetChat() {
+    currentConversationId = null;
+    titleEl.textContent = 'New Conversation';
+    metaEl.textContent  = 'Ask anything about your documents';
+    feed.innerHTML = `
+      <div class="message assistant" id="welcomeMsg">
+        <div class="message-avatar" aria-hidden="true">AI</div>
+        <div class="message-body">
+          <div class="message-bubble">
+            <p><strong>Hello! I'm your Documentation Assistant.</strong></p>
+            <p>Ask me anything about your uploaded documents.</p>
+          </div>
+        </div>
+      </div>`;
+    input.value = '';
+    sendBtn.disabled = true;
+    loadConversations();
+  }
+
+  document.getElementById('newChatBtn').addEventListener('click', resetChat);
+  document.getElementById('clearChatBtn').addEventListener('click', resetChat);
+
+  // ---- Load conversation history into sidebar -----------------
+  async function loadConversations() {
+    const container = document.getElementById('conversationsList');
+    try {
+      const convs = await chat.listConversations(0, 20);
+      if (!convs.length) {
+        container.innerHTML = `<div style="padding:var(--space-2) var(--space-3);font-size:var(--text-xs);color:var(--sidebar-text);opacity:0.5;">No history yet</div>`;
+        return;
+      }
+      container.innerHTML = convs.map(c => `
+        <button class="nav-link ${c.id === currentConversationId ? 'active' : ''}"
+                data-conv-id="${c.id}"
+                style="width:100%;text-align:left;border:none;cursor:pointer;font-size:var(--text-xs);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;"
+                title="${escapeHtml(c.title || 'Untitled')}">
+          <span class="nav-icon">💬</span>
+          ${escapeHtml((c.title || 'Untitled').slice(0, 28))}
+        </button>`).join('');
+
+      container.querySelectorAll('[data-conv-id]').forEach(btn => {
+        btn.addEventListener('click', () => loadConversation(Number(btn.dataset.convId)));
+      });
+    } catch { /* sidebar history is non-critical */ }
+  }
+
+  async function loadConversation(id) {
+    try {
+      const conv = await chat.getConversation(id);
+      currentConversationId = id;
+      titleEl.textContent = conv.title || `Conversation #${id}`;
+      metaEl.textContent  = `${conv.messages.length} messages`;
+      feed.innerHTML = '';
+
+      conv.messages.forEach(m => {
+        if (m.role === 'user')      appendUserBubble(m.content);
+        else appendAssistantBubble(m.content, m.sources || []);
+      });
+
+      loadConversations();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  }
+
+  loadConversations();
+</script>
+</body>
+</html>

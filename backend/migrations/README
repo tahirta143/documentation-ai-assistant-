@@ -1,0 +1,18 @@
+Alembic migration environment for Documentation Assistant.
+
+Common commands (run from the backend/ directory):
+
+  # Generate a new migration from model changes
+  alembic revision --autogenerate -m "describe your change"
+
+  # Apply all pending migrations
+  alembic upgrade head
+
+  # Rollback one migration
+  alembic downgrade -1
+
+  # Show current revision
+  alembic current
+
+  # Show migration history
+  alembic history --verbose

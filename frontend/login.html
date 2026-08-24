@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign In — Documentation Assistant</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/base.css">
+  <style>
+    body { display: flex; align-items: center; justify-content: center; min-height: 100vh; background: var(--color-bg); }
+    .login-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-xl);
+      padding: var(--space-10);
+      width: 100%;
+      max-width: 420px;
+      box-shadow: var(--shadow-lg);
+    }
+    .login-logo {
+      display: flex; align-items: center; gap: var(--space-3);
+      margin-bottom: var(--space-8);
+    }
+    .login-logo-icon {
+      width: 44px; height: 44px;
+      background: var(--color-primary);
+      border-radius: var(--radius-md);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.4rem;
+    }
+    .login-logo-text { font-weight: 700; font-size: var(--text-lg); }
+    .login-logo-text span { display: block; font-size: var(--text-sm); color: var(--color-text-muted); font-weight: 400; }
+    .login-title { font-size: var(--text-2xl); font-weight: 700; margin-bottom: var(--space-2); }
+    .login-subtitle { color: var(--color-text-muted); font-size: var(--text-sm); margin-bottom: var(--space-8); }
+    .form-group { margin-bottom: var(--space-4); }
+    .form-label { display: block; font-size: var(--text-sm); font-weight: 500; margin-bottom: var(--space-2); }
+    .form-input {
+      width: 100%; padding: var(--space-3); border: 1px solid var(--color-border);
+      border-radius: var(--radius-md); font-size: var(--text-sm); outline: none;
+      transition: border-color var(--transition), box-shadow var(--transition);
+    }
+    .form-input:focus { border-color: var(--color-primary); box-shadow: 0 0 0 3px rgba(79,70,229,0.1); }
+    .btn-full { width: 100%; justify-content: center; padding: var(--space-3); font-size: var(--text-base); }
+    .dev-notice {
+      margin-top: var(--space-6);
+      padding: var(--space-3) var(--space-4);
+      background: #fef3c7;
+      border-radius: var(--radius-md);
+      font-size: var(--text-xs);
+      color: #92400e;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="login-logo-icon">📚</div>
+      <div class="login-logo-text">
+        Documentation Assistant
+        <span>AI-powered document Q&A</span>
+      </div>
+    </div>
+
+    <h1 class="login-title">Welcome back</h1>
+    <p class="login-subtitle">Sign in to your account to continue.</p>
+
+    <div id="loginError" style="display:none" class="dev-notice" role="alert"></div>
+
+    <form id="loginForm">
+      <div class="form-group">
+        <label class="form-label" for="email">Email address</label>
+        <input class="form-input" type="email" id="email" name="email"
+               placeholder="you@example.com" required autocomplete="email">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="password">Password</label>
+        <input class="form-input" type="password" id="password" name="password"
+               placeholder="••••••••" required autocomplete="current-password">
+      </div>
+      <button type="submit" class="btn btn-primary btn-full" id="loginBtn">
+        Sign in
+      </button>
+    </form>
+
+    <div class="dev-notice">
+      🚧 Auth is a Phase 14 feature. Click Sign in to continue as the dev user.
+    </div>
+  </div>
+
+  <script>
+    document.getElementById('loginForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      // Phase 14 placeholder — redirect straight to dashboard
+      window.location.href = '/static/index.html';
+    });
+  </script>
+</body>
+</html>

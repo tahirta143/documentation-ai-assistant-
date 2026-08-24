@@ -6,6 +6,24 @@ python-dotenv
 pydantic
 pydantic-settings
 
+# Phase 2 — PostgreSQL + pgvector
+alembic
+psycopg2-binary
+pgvector
+
+# Phase 4 — file uploads
+python-multipart
+
+# Phase 5 — text extraction
+pymupdf
+beautifulsoup4
+httpx
+tiktoken
+markdown-it-py
+
+# Phase 7+8 — embeddings + LLM
+openai
+
 # Testing
 pytest
 pytest-asyncio
