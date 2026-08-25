@@ -9,7 +9,7 @@ from app.db.base import Base
 # even if the pgvector extension is not yet enabled in the database.
 try:
     from pgvector.sqlalchemy import Vector
-    _VECTOR_TYPE = Vector(1536)   # default dimension for text-embedding-3-small
+    _VECTOR_TYPE = Vector(3072)   # default dimension for gemini-embedding-001
 except ImportError:
     # Fallback: store embeddings as plain Text (dev / no-pgvector environment).
     # Replace with Vector once pgvector is installed.
@@ -31,7 +31,7 @@ class DocumentChunk(Base):
     chunk_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     page_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    # Vector column — 1536-dim float32 (matches OpenAI text-embedding-3-small).
+    # Vector column — 3072-dim float32 (matches Gemini gemini-embedding-001).
     # Dimension must match EMBEDDING_DIMENSION in config; change here + re-migrate
     # if you switch models.
     embedding: Mapped[None] = mapped_column(_VECTOR_TYPE, nullable=True)

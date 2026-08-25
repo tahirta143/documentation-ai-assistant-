@@ -95,30 +95,34 @@ def run(
 
 
 def _call_llm(question: str, context: str) -> str:
-    """Send the context + question to the LLM and return the answer string."""
-    from openai import OpenAI
+    """Send the context + question to Gemini and return the answer string."""
+    from google import genai
+    from google.genai import types
 
-    client = OpenAI(api_key=settings.openai_api_key)
+    client = genai.Client(
+        api_key=settings.gemini_api_key,
+        http_options={"api_version": "v1"},
+    )
     user_message = build_prompt(context=context, question=question)
 
     try:
-        response = client.chat.completions.create(
+        response = client.models.generate_content(
             model=settings.llm_model,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user",   "content": user_message},
-            ],
-            temperature=0.0,      # deterministic answers for factual RAG
-            max_tokens=1024,
+            contents=user_message,
+            config=types.GenerateContentConfig(
+                system_instruction=SYSTEM_PROMPT,
+                temperature=0.0,
+                max_output_tokens=1024,
+            ),
         )
-        answer = response.choices[0].message.content or _NO_CONTEXT_ANSWER
+        answer = response.text or _NO_CONTEXT_ANSWER
         logger.info(
-            "LLM response received (model=%s, tokens_used=%d)",
+            "LLM response received (model=%s)",
             settings.llm_model,
-            response.usage.total_tokens if response.usage else 0,
         )
         return answer.strip()
 
     except Exception as exc:
         logger.error("LLM call failed: %s", exc)
         raise
+

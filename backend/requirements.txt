@@ -21,8 +21,8 @@ httpx
 tiktoken
 markdown-it-py
 
-# Phase 7+8 — embeddings + LLM
-openai
+# Phase 7+8 — embeddings + LLM (Gemini)
+google-genai
 
 # Testing
 pytest

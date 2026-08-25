@@ -1,7 +1,7 @@
 """
-Embedding service — generates vector embeddings for text using OpenAI.
+Embedding service — generates vector embeddings for text using Google Gemini.
 
-Batches chunks to stay within the API's per-request token limit.
+Processes chunks individually via the Gemini embedding API.
 Retries transient errors with exponential back-off.
 """
 
@@ -9,21 +9,23 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-_BATCH_SIZE = 100          # chunks per API call (OpenAI limit is 2048 inputs)
+_BATCH_SIZE = 100          # chunks per API call
 _MAX_RETRIES = 3
 _BACKOFF_BASE = 2.0        # seconds
 
 
 def _get_client():
-    """Return a cached OpenAI client (lazy init)."""
-    from openai import OpenAI
-    return OpenAI(api_key=settings.openai_api_key)
+    """Return a Gemini GenAI client (lazy init)."""
+    from google import genai
+    return genai.Client(
+        api_key=settings.gemini_api_key,
+        http_options={"api_version": "v1"},
+    )
 
 
 def embed_texts(texts: list[str]) -> list[list[float]]:
@@ -56,18 +58,17 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     return all_embeddings
 
 
-def _embed_batch_with_retry(client: Any, texts: list[str]) -> list[list[float]]:
-    """Embed a single batch with retry logic."""
+def _embed_batch_with_retry(client, texts: list[str]) -> list[list[float]]:
+    """Embed a batch of texts with retry logic."""
     last_exc: Exception | None = None
 
     for attempt in range(_MAX_RETRIES):
         try:
-            response = client.embeddings.create(
+            result = client.models.embed_content(
                 model=settings.embedding_model,
-                input=texts,
+                contents=texts,
             )
-            # Sort by index to guarantee order matches input
-            return [item.embedding for item in sorted(response.data, key=lambda x: x.index)]
+            return [list(emb.values) for emb in result.embeddings]
         except Exception as exc:
             last_exc = exc
             wait = _BACKOFF_BASE ** attempt

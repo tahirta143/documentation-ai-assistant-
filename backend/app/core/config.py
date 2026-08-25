@@ -43,13 +43,13 @@ class Settings(BaseSettings):
     chunk_overlap: int = 100
 
     # ------------------------------------------------------------------
-    # Embeddings + LLM (Phase 7+)
+    # Embeddings + LLM (Gemini)
     # ------------------------------------------------------------------
-    embedding_provider: str = "openai"
-    openai_api_key: str = ""
-    embedding_model: str = "text-embedding-3-small"
-    embedding_dimension: int = 1536
-    llm_model: str = "gpt-4o-mini"
+    embedding_provider: str = "gemini"
+    gemini_api_key: str = ""
+    embedding_model: str = "gemini-embedding-001"
+    embedding_dimension: int = 3072
+    llm_model: str = "gemini-2.0-flash"
     retrieval_top_k: int = 5          # number of chunks to retrieve per query
 
 
