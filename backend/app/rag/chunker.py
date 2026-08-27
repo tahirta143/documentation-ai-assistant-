@@ -78,8 +78,8 @@ def chunk_text(
         end = min(start + chunk_size, len(tokens))
         window = tokens[start:end]
 
-        # Skip tiny trailing slivers (< 20% of chunk_size)
-        if len(window) < max(1, chunk_size // 5):
+        # Skip tiny trailing slivers (< 20% of chunk_size) only for subsequent windows
+        if start > 0 and len(window) < max(1, chunk_size // 5):
             break
 
         content = enc.decode(window)

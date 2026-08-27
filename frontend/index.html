@@ -9,6 +9,11 @@
   <link rel="stylesheet" href="/static/css/base.css">
   <link rel="stylesheet" href="/static/css/layout.css">
   <link rel="stylesheet" href="/static/css/components.css">
+  <script>
+    if (!localStorage.getItem('docs_assistant_token')) {
+      window.location.replace('/static/login.html');
+    }
+  </script>
 </head>
 <body>
 <div class="app-shell">
@@ -33,6 +38,12 @@
       <a href="/static/chat.html" class="nav-link">
         <span class="nav-icon">💬</span> Chat
       </a>
+
+      <div class="nav-section-label" style="margin-top:auto; padding-top:var(--space-6);">Account</div>
+      <div id="userEmailDisplay" style="padding: 0 var(--space-3); font-size: var(--text-xs); color: var(--color-text-muted); word-break: break-all; margin-bottom: var(--space-2);"></div>
+      <button id="logoutBtn" class="nav-link" onclick="logoutApp()" style="background:none; border:none; width:100%; text-align:left; cursor:pointer; color:#f87171;">
+        <span class="nav-icon">🚪</span> Sign Out
+      </button>
     </nav>
   </aside>
 
@@ -41,10 +52,10 @@
     <header class="page-header">
       <div>
         <h1 class="page-title">Dashboard</h1>
-        <p class="page-subtitle">Overview of your documentation library</p>
+        <p class="page-subtitle">Overview of your personal documentation library</p>
       </div>
       <a href="/static/documents.html" class="btn btn-primary">
-        <span>+</span> Upload Document
+        <span>+</span> Add Documentation
       </a>
     </header>
 
@@ -100,17 +111,17 @@
       <div class="grid-2" style="margin-top: var(--space-6);">
         <div class="card" style="text-align:center; padding: var(--space-8);">
           <div style="font-size:2.5rem; margin-bottom: var(--space-4);">📤</div>
-          <h3 class="card-title" style="margin-bottom: var(--space-2);">Upload a Document</h3>
+          <h3 class="card-title" style="margin-bottom: var(--space-2);">Upload or Ingest URL</h3>
           <p style="color:var(--color-text-muted); font-size:var(--text-sm); margin-bottom:var(--space-5);">
-            Add PDFs, Markdown, or text files to your knowledge base.
+            Add PDFs, Markdown, TXT, or web documentation to your private index.
           </p>
-          <a href="/static/documents.html" class="btn btn-primary">Upload Now</a>
+          <a href="/static/documents.html" class="btn btn-primary">Add Documents</a>
         </div>
         <div class="card" style="text-align:center; padding: var(--space-8);">
           <div style="font-size:2.5rem; margin-bottom: var(--space-4);">💬</div>
           <h3 class="card-title" style="margin-bottom: var(--space-2);">Ask a Question</h3>
           <p style="color:var(--color-text-muted); font-size:var(--text-sm); margin-bottom:var(--space-5);">
-            Get answers grounded in your uploaded documentation.
+            Get streaming answers strictly grounded in your documentation with source citations.
           </p>
           <a href="/static/chat.html" class="btn btn-primary">Start Chat</a>
         </div>
@@ -121,8 +132,29 @@
 </div>
 
 <script type="module">
-  import { documents, chat } from '/static/js/api.js';
-  import { formatDate, fileTypeIcon, statusBadge, escapeHtml } from '/static/js/utils.js';
+  import { auth } from '/static/js/auth.js?v=2';
+  import { documents, chat, authApi } from '/static/js/api.js?v=2';
+  import { formatDate, statusBadge, escapeHtml } from '/static/js/utils.js?v=2';
+
+  window.logoutApp = function() {
+    localStorage.removeItem('docs_assistant_token');
+    localStorage.removeItem('docs_assistant_user');
+    window.location.href = '/static/login.html';
+  };
+
+  if (auth.requireAuth()) {
+    const user = auth.getUser();
+    if (user && user.email) {
+      document.getElementById('userEmailDisplay').textContent = user.email;
+    } else {
+      authApi.me().then(u => {
+        auth.setSession(auth.getToken(), u);
+        document.getElementById('userEmailDisplay').textContent = u.email;
+      }).catch(() => {});
+    }
+
+    loadDashboard();
+  }
 
   async function loadDashboard() {
     try {
@@ -149,8 +181,8 @@
           <div class="empty-state">
             <div class="empty-state-icon">📂</div>
             <div class="empty-state-title">No documents yet</div>
-            <p class="empty-state-text">Upload your first document to get started.</p>
-            <a href="/static/documents.html" class="btn btn-primary" style="margin-top:var(--space-4);">Upload Document</a>
+            <p class="empty-state-text">Upload files or ingest documentation URLs to get started.</p>
+            <a href="/static/documents.html" class="btn btn-primary" style="margin-top:var(--space-4);">Add Documents</a>
           </div>`;
         return;
       }
@@ -178,8 +210,6 @@
         `<div class="empty-state"><div class="empty-state-icon">⚠️</div><div class="empty-state-title">Could not load data</div><p class="empty-state-text">${escapeHtml(err.message)}</p></div>`;
     }
   }
-
-  loadDashboard();
 </script>
 </body>
 </html>

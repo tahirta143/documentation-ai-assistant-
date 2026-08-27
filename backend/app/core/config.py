@@ -23,6 +23,13 @@ class Settings(BaseSettings):
     port: int = 8000
 
     # ------------------------------------------------------------------
+    # Security / Auth (Phase 14)
+    # ------------------------------------------------------------------
+    jwt_secret_key: str = "supersecret_jwt_key_for_development_change_in_production_123456789"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 60 * 24 * 7  # 7 days
+
+    # ------------------------------------------------------------------
     # Database (Phase 2)
     # ------------------------------------------------------------------
     database_url: str = "postgresql+psycopg2://postgres:postgres@localhost:5432/documentation_assistant"

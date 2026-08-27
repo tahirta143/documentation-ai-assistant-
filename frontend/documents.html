@@ -9,6 +9,11 @@
   <link rel="stylesheet" href="/static/css/base.css">
   <link rel="stylesheet" href="/static/css/layout.css">
   <link rel="stylesheet" href="/static/css/components.css">
+  <script>
+    if (!localStorage.getItem('docs_assistant_token')) {
+      window.location.replace('/static/login.html');
+    }
+  </script>
 </head>
 <body>
 <div class="app-shell">
@@ -24,6 +29,12 @@
       <a href="/static/index.html" class="nav-link"><span class="nav-icon">🏠</span> Dashboard</a>
       <a href="/static/documents.html" class="nav-link active" aria-current="page"><span class="nav-icon">📁</span> Documents</a>
       <a href="/static/chat.html" class="nav-link"><span class="nav-icon">💬</span> Chat</a>
+
+      <div class="nav-section-label" style="margin-top:auto; padding-top:var(--space-6);">Account</div>
+      <div id="userEmailDisplay" style="padding: 0 var(--space-3); font-size: var(--text-xs); color: var(--color-text-muted); word-break: break-all; margin-bottom: var(--space-2);"></div>
+      <button id="logoutBtn" class="nav-link" onclick="logoutApp()" style="background:none; border:none; width:100%; text-align:left; cursor:pointer; color:#f87171;">
+        <span class="nav-icon">🚪</span> Sign Out
+      </button>
     </nav>
   </aside>
 
@@ -32,39 +43,57 @@
     <header class="page-header">
       <div>
         <h1 class="page-title">Documents</h1>
-        <p class="page-subtitle">Upload and manage your knowledge base</p>
+        <p class="page-subtitle">Upload files or ingest documentation from web URLs</p>
       </div>
     </header>
 
     <div class="page-body">
 
-      <!-- Upload zone -->
-      <div class="card" style="margin-bottom: var(--space-6);">
-        <h2 class="card-title" style="margin-bottom:var(--space-4);">Upload a Document</h2>
+      <!-- Upload zone & URL Ingestion Grid -->
+      <div class="grid-2" style="margin-bottom: var(--space-6);">
+        <!-- File Upload Card -->
+        <div class="card">
+          <h2 class="card-title" style="margin-bottom:var(--space-4);">Upload Document File</h2>
+          <div class="upload-zone" id="uploadZone" role="button" tabindex="0" aria-label="Click or drag a file to upload">
+            <input type="file" id="fileInput" accept=".pdf,.md,.txt" aria-label="Select file to upload">
+            <div class="upload-icon" aria-hidden="true">📤</div>
+            <div class="upload-title">Drop your file here, or click to browse</div>
+            <div class="upload-hint">PDF, Markdown (.md), Text (.txt) · Max 25 MB</div>
+          </div>
 
-        <div class="upload-zone" id="uploadZone" role="button" tabindex="0"
-             aria-label="Click or drag a file to upload">
-          <input type="file" id="fileInput" accept=".pdf,.md,.txt"
-                 aria-label="Select file to upload">
-          <div class="upload-icon" aria-hidden="true">📤</div>
-          <div class="upload-title">Drop your file here, or click to browse</div>
-          <div class="upload-hint">Supported formats: PDF, Markdown (.md), Text (.txt) · Max 25 MB</div>
+          <!-- Upload progress -->
+          <div id="uploadProgress" style="display:none; margin-top:var(--space-4);">
+            <div style="display:flex; justify-content:space-between; margin-bottom:var(--space-2);">
+              <span class="form-label" id="uploadFileName">Uploading…</span>
+              <span id="uploadStatus" style="font-size:var(--text-sm); color:var(--color-text-muted);"></span>
+            </div>
+            <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+          </div>
         </div>
 
-        <!-- Upload progress -->
-        <div id="uploadProgress" style="display:none; margin-top:var(--space-4);">
-          <div style="display:flex; justify-content:space-between; margin-bottom:var(--space-2);">
-            <span class="form-label" id="uploadFileName">Uploading…</span>
-            <span id="uploadStatus" style="font-size:var(--text-sm); color:var(--color-text-muted);"></span>
-          </div>
-          <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+        <!-- URL Ingestion Card (Phase 15) -->
+        <div class="card">
+          <h2 class="card-title" style="margin-bottom:var(--space-2);">Ingest from Web URL</h2>
+          <p style="color:var(--color-text-muted); font-size:var(--text-sm); margin-bottom:var(--space-4);">
+            Provide a documentation URL to crawl and index clean text directly into pgvector.
+          </p>
+          <form id="urlForm">
+            <div class="form-group" style="margin-bottom:var(--space-4);">
+              <label class="form-label" for="urlInput">Documentation Web URL</label>
+              <input class="form-input" type="url" id="urlInput" placeholder="https://docs.python.org/3/tutorial/" required>
+            </div>
+            <button type="submit" class="btn btn-primary" id="urlSubmitBtn" style="width:100%; justify-content:center;">
+              ⚡ Scrape &amp; Ingest URL
+            </button>
+          </form>
+          <div id="urlNotice" style="display:none; margin-top:var(--space-3); font-size:var(--text-sm); padding:var(--space-3); border-radius:var(--radius-md);"></div>
         </div>
       </div>
 
       <!-- Documents table -->
       <div class="card">
         <div class="card-header">
-          <h2 class="card-title">Your Documents <span id="docCount" style="color:var(--color-text-muted);font-weight:400;font-size:var(--text-sm);"></span></h2>
+          <h2 class="card-title">Your Library <span id="docCount" style="color:var(--color-text-muted);font-weight:400;font-size:var(--text-sm);"></span></h2>
           <button class="btn btn-ghost btn-sm" id="refreshBtn" aria-label="Refresh document list">↺ Refresh</button>
         </div>
         <div id="docsTableContent">
@@ -77,72 +106,134 @@
 </div>
 
 <script type="module">
-  import { documents } from '/static/js/api.js';
-  import { escapeHtml, formatDate, formatBytes, fileTypeIcon, statusBadge, toast } from '/static/js/utils.js';
+  import { auth } from '/static/js/auth.js?v=2';
+  import { documents, authApi } from '/static/js/api.js?v=2';
+  import { escapeHtml, formatDate, formatBytes, fileTypeIcon, statusBadge, toast } from '/static/js/utils.js?v=2';
 
-  // ---- Upload zone wiring ----------------------------------------
-  const zone    = document.getElementById('uploadZone');
-  const input   = document.getElementById('fileInput');
-  const progress = document.getElementById('uploadProgress');
-  const fill    = document.getElementById('progressFill');
-  const fname   = document.getElementById('uploadFileName');
-  const fstatus = document.getElementById('uploadStatus');
+  window.logoutApp = function() {
+    localStorage.removeItem('docs_assistant_token');
+    localStorage.removeItem('docs_assistant_user');
+    window.location.href = '/static/login.html';
+  };
 
-  zone.addEventListener('click', () => input.click());
-  zone.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') input.click(); });
-
-  zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('dragover'); });
-  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
-  zone.addEventListener('drop', e => {
-    e.preventDefault();
-    zone.classList.remove('dragover');
-    if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0]);
-  });
-
-  input.addEventListener('change', () => { if (input.files[0]) uploadFile(input.files[0]); });
-
-  async function uploadFile(file) {
-    fname.textContent  = file.name;
-    fstatus.textContent = 'Uploading…';
-    progress.style.display = 'block';
-
-    // Animate indeterminate progress
-    let p = 0;
-    const interval = setInterval(() => {
-      p = Math.min(p + Math.random() * 15, 85);
-      fill.style.width = p + '%';
-    }, 200);
-
-    try {
-      await documents.upload(file);
-      clearInterval(interval);
-      fill.style.width = '100%';
-      fstatus.textContent = 'Done!';
-      toast(`"${file.name}" uploaded and ingested`, 'success');
-      setTimeout(() => { progress.style.display = 'none'; fill.style.width = '0%'; input.value = ''; }, 1500);
-      loadDocs();
-    } catch (err) {
-      clearInterval(interval);
-      fill.style.width = '0%';
-      progress.style.display = 'none';
-      toast(err.message, 'error');
+  if (auth.requireAuth()) {
+    const user = auth.getUser();
+    if (user && user.email) {
+      document.getElementById('userEmailDisplay').textContent = user.email;
+    } else {
+      authApi.me().then(u => {
+        auth.setSession(auth.getToken(), u);
+        document.getElementById('userEmailDisplay').textContent = u.email;
+      }).catch(() => {});
     }
+
+    init();
   }
 
-  // ---- Documents table ----------------------------------------
-  async function loadDocs() {
+  function init() {
+    // ---- Upload zone wiring ----------------------------------------
+    const zone    = document.getElementById('uploadZone');
+    const input   = document.getElementById('fileInput');
+    const progress = document.getElementById('uploadProgress');
+    const fill    = document.getElementById('progressFill');
+    const fname   = document.getElementById('uploadFileName');
+    const fstatus = document.getElementById('uploadStatus');
+
+    zone.addEventListener('click', () => input.click());
+    zone.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') input.click(); });
+
+    zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('dragover'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+    zone.addEventListener('drop', e => {
+      e.preventDefault();
+      zone.classList.remove('dragover');
+      if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0]);
+    });
+
+    input.addEventListener('change', () => { if (input.files[0]) uploadFile(input.files[0]); });
+
+    async function uploadFile(file) {
+      fname.textContent  = file.name;
+      fstatus.textContent = 'Uploading & indexing…';
+      progress.style.display = 'block';
+
+      let p = 0;
+      const interval = setInterval(() => {
+        p = Math.min(p + Math.random() * 15, 85);
+        fill.style.width = p + '%';
+      }, 200);
+
+      try {
+        await documents.upload(file);
+        clearInterval(interval);
+        fill.style.width = '100%';
+        fstatus.textContent = 'Indexed successfully!';
+        toast(`"${file.name}" uploaded and indexed`, 'success');
+        setTimeout(() => {
+          progress.style.display = 'none';
+          fill.style.width = '0%';
+          input.value = '';
+        }, 1200);
+        loadDocuments();
+      } catch (err) {
+        clearInterval(interval);
+        fill.style.width = '0%';
+        progress.style.display = 'none';
+        toast(err.message, 'error');
+      }
+    }
+
+    // ---- URL Ingestion Wiring ---------------------------------------
+    const urlForm = document.getElementById('urlForm');
+    const urlInput = document.getElementById('urlInput');
+    const urlBtn = document.getElementById('urlSubmitBtn');
+    const urlNotice = document.getElementById('urlNotice');
+
+    urlForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const url = urlInput.value.trim();
+      if (!url) return;
+
+      urlBtn.disabled = true;
+      urlBtn.textContent = 'Fetching & indexing…';
+      urlNotice.style.display = 'none';
+
+      try {
+        await documents.ingestUrl(url);
+        toast(`URL ingested and indexed successfully`, 'success');
+        urlInput.value = '';
+        loadDocuments();
+      } catch (err) {
+        urlNotice.textContent = err.message;
+        urlNotice.style.background = '#fee2e2';
+        urlNotice.style.color = '#991b1b';
+        urlNotice.style.display = 'block';
+      } finally {
+        urlBtn.disabled = false;
+        urlBtn.textContent = '⚡ Scrape & Ingest URL';
+      }
+    });
+
+    // ---- Document table wiring -------------------------------------
+    document.getElementById('refreshBtn').addEventListener('click', loadDocuments);
+    loadDocuments();
+  }
+
+  async function loadDocuments() {
+    const container = document.getElementById('docsTableContent');
+    const countEl   = document.getElementById('docCount');
+
     try {
-      const data = await documents.list(0, 200);
+      const data = await documents.list(0, 100);
       const docs = data.items || [];
-      document.getElementById('docCount').textContent = `(${data.total})`;
-      const container = document.getElementById('docsTableContent');
+      countEl.textContent = `(${data.total})`;
 
       if (docs.length === 0) {
         container.innerHTML = `
           <div class="empty-state">
             <div class="empty-state-icon">📂</div>
             <div class="empty-state-title">No documents yet</div>
-            <p class="empty-state-text">Upload a PDF, Markdown, or text file above.</p>
+            <p class="empty-state-text">Upload your first document or ingest a URL above.</p>
           </div>`;
         return;
       }
@@ -151,61 +242,60 @@
         <div class="table-wrapper">
           <table>
             <thead><tr>
-              <th>Document</th><th>Type</th><th>Size</th><th>Status</th><th>Uploaded</th><th></th>
+              <th>Type</th>
+              <th>Name</th>
+              <th>Size</th>
+              <th>Status</th>
+              <th>Uploaded</th>
+              <th style="text-align:right;">Actions</th>
             </tr></thead>
-            <tbody id="docsTableBody"></tbody>
+            <tbody>
+              ${docs.map(d => `
+                <tr id="doc-row-${d.id}">
+                  <td style="font-size:1.3rem;">${fileTypeIcon(d.file_type)}</td>
+                  <td>
+                    <span style="font-weight:600; display:block;">${escapeHtml(d.filename)}</span>
+                    <span style="font-size:var(--text-xs); color:var(--color-text-muted);">${escapeHtml(d.file_path)}</span>
+                  </td>
+                  <td style="color:var(--color-text-muted); font-size:var(--text-sm);">${formatBytes(d.file_size)}</td>
+                  <td>${statusBadge(d.status)}</td>
+                  <td style="color:var(--color-text-muted); font-size:var(--text-sm);">${formatDate(d.created_at)}</td>
+                  <td style="text-align:right;">
+                    <button class="btn btn-ghost btn-sm delete-btn" data-id="${d.id}" data-name="${escapeHtml(d.filename)}"
+                            style="color:var(--color-error); hover:background:#fee2e2;" aria-label="Delete document">
+                      🗑 Delete
+                    </button>
+                  </td>
+                </tr>`).join('')}
+            </tbody>
           </table>
         </div>`;
 
-      const tbody = document.getElementById('docsTableBody');
-      docs.forEach(doc => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>
-            <div style="display:flex;align-items:center;gap:var(--space-2);">
-              <span aria-hidden="true">${fileTypeIcon(doc.file_type)}</span>
-              <span style="font-weight:500;">${escapeHtml(doc.filename)}</span>
-            </div>
-          </td>
-          <td><span style="text-transform:uppercase;font-size:var(--text-xs);font-weight:600;color:var(--color-text-muted);">${escapeHtml(doc.file_type)}</span></td>
-          <td style="color:var(--color-text-muted);">${formatBytes(doc.file_size)}</td>
-          <td>${statusBadge(doc.status)}</td>
-          <td style="color:var(--color-text-muted);">${formatDate(doc.created_at)}</td>
-          <td>
-            <button class="btn btn-danger btn-sm" data-id="${doc.id}" data-name="${escapeHtml(doc.filename)}"
-                    aria-label="Delete ${escapeHtml(doc.filename)}">
-              Delete
-            </button>
-          </td>`;
-        tbody.appendChild(tr);
-      });
+      container.querySelectorAll('.delete-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const id   = btn.dataset.id;
+          const name = btn.dataset.name;
+          if (!confirm(`Delete "${name}" and all its chunk vectors?`)) return;
 
-      // Delete handlers
-      tbody.addEventListener('click', async e => {
-        const btn = e.target.closest('[data-id]');
-        if (!btn) return;
-        const id = btn.dataset.id;
-        const name = btn.dataset.name;
-        if (!confirm(`Delete "${name}"? This also removes all its chunks.`)) return;
-        btn.disabled = true;
-        try {
-          await documents.delete(id);
-          toast(`"${name}" deleted`, 'success');
-          loadDocs();
-        } catch (err) {
-          toast(err.message, 'error');
-          btn.disabled = false;
-        }
+          try {
+            await documents.delete(id);
+            toast(`"${name}" deleted`, 'info');
+            loadDocuments();
+          } catch (err) {
+            toast(err.message, 'error');
+          }
+        });
       });
 
     } catch (err) {
-      document.getElementById('docsTableContent').innerHTML =
-        `<div class="empty-state"><div class="empty-state-icon">⚠️</div><div class="empty-state-title">Error loading documents</div><p class="empty-state-text">${escapeHtml(err.message)}</p></div>`;
+      container.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-state-icon">⚠️</div>
+          <div class="empty-state-title">Failed to load documents</div>
+          <p class="empty-state-text">${escapeHtml(err.message)}</p>
+        </div>`;
     }
   }
-
-  document.getElementById('refreshBtn').addEventListener('click', loadDocs);
-  loadDocs();
 </script>
 </body>
 </html>

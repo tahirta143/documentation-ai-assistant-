@@ -8,7 +8,6 @@ venv/
 .mypy_cache/
 
 # Environment
-.env
 
 # Uploads
 data/uploads/*
@@ -16,9 +15,9 @@ data/uploads/*
 
 # IDE / OS
 .idea/
-.vscode/
 .DS_Store
 Thumbs.db
 
 # Node (frontend, future)
 node_modules/
+config.bat

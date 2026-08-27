@@ -3,7 +3,8 @@ from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.router import api_router
@@ -42,7 +43,22 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+
+    # In development, disable static browser caching to prevent stale script execution
+    @app.middleware("http")
+    async def add_no_cache_headers(request: Request, call_next):
+        response: Response = await call_next(request)
+        if request.url.path.startswith("/static"):
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
+
     app.include_router(api_router, prefix=settings.api_v1_prefix)
+
+    @app.get("/", include_in_schema=False)
+    def root_redirect():
+        return RedirectResponse(url="/static/index.html")
 
     # Mount frontend static files — serves index.html, CSS, JS at /static/
     frontend_dir = Path(__file__).resolve().parent.parent.parent / "frontend"

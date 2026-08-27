@@ -10,6 +10,11 @@
   <link rel="stylesheet" href="/static/css/layout.css">
   <link rel="stylesheet" href="/static/css/components.css">
   <link rel="stylesheet" href="/static/css/chat.css">
+  <script>
+    if (!localStorage.getItem('docs_assistant_token')) {
+      window.location.replace('/static/login.html');
+    }
+  </script>
 </head>
 <body>
 <div class="app-shell">
@@ -27,9 +32,15 @@
       <a href="/static/chat.html" class="nav-link active" aria-current="page"><span class="nav-icon">💬</span> Chat</a>
 
       <div class="nav-section-label" style="margin-top:var(--space-4);">History</div>
-      <div id="conversationsList" style="overflow-y:auto; max-height:300px;"></div>
+      <div id="conversationsList" style="overflow-y:auto; max-height:240px;"></div>
       <button id="newChatBtn" class="nav-link" style="background:rgba(79,70,229,0.2);color:#c7d2fe;cursor:pointer;border:none;width:100%;text-align:left;margin-top:var(--space-2);">
         <span class="nav-icon">+</span> New Chat
+      </button>
+
+      <div class="nav-section-label" style="margin-top:auto; padding-top:var(--space-4);">Account</div>
+      <div id="userEmailDisplay" style="padding: 0 var(--space-3); font-size: var(--text-xs); color: var(--color-text-muted); word-break: break-all; margin-bottom: var(--space-2);"></div>
+      <button id="logoutBtn" class="nav-link" onclick="logoutApp()" style="background:none; border:none; width:100%; text-align:left; cursor:pointer; color:#f87171;">
+        <span class="nav-icon">🚪</span> Sign Out
       </button>
     </nav>
   </aside>
@@ -55,9 +66,9 @@
         <div class="message-body">
           <div class="message-bubble">
             <p><strong>Hello! I'm your Documentation Assistant.</strong></p>
-            <p>Ask me anything about your uploaded documents. I'll answer only from your content and show you the sources.</p>
+            <p>Ask me anything about your uploaded documents or ingested web pages. Answers are grounded exclusively in your indexed content, complete with source citations.</p>
             <p style="color:var(--color-text-muted);font-size:var(--text-sm);margin-top:var(--space-3);">
-              💡 Make sure you have <a href="/static/documents.html">uploaded documents</a> first.
+              💡 Manage your content library in <a href="/static/documents.html">Documents</a>.
             </p>
           </div>
         </div>
@@ -77,15 +88,36 @@
           </svg>
         </button>
       </div>
-      <p class="chat-input-hint">Answers are grounded in your documentation only.</p>
+      <p class="chat-input-hint">Real-time SSE streaming answers grounded in documentation only.</p>
     </div>
   </div>
 
 </div>
 
 <script type="module">
-  import { chat, documents } from '/static/js/api.js';
-  import { escapeHtml, formatDateTime, renderMarkdown, toast } from '/static/js/utils.js';
+  import { auth } from '/static/js/auth.js?v=2';
+  import { chat, authApi } from '/static/js/api.js?v=2';
+  import { escapeHtml, formatDateTime, renderMarkdown, toast } from '/static/js/utils.js?v=2';
+
+  window.logoutApp = function() {
+    localStorage.removeItem('docs_assistant_token');
+    localStorage.removeItem('docs_assistant_user');
+    window.location.href = '/static/login.html';
+  };
+
+  if (!auth.requireAuth()) {
+    throw new Error("Unauthenticated");
+  }
+
+  const user = auth.getUser();
+  if (user && user.email) {
+    document.getElementById('userEmailDisplay').textContent = user.email;
+  } else {
+    authApi.me().then(u => {
+      auth.setSession(auth.getToken(), u);
+      document.getElementById('userEmailDisplay').textContent = u.email;
+    }).catch(() => {});
+  }
 
   let currentConversationId = null;
   const feed     = document.getElementById('chatFeed');
@@ -107,6 +139,8 @@
   });
 
   sendBtn.addEventListener('click', doSend);
+  document.getElementById('clearChatBtn').addEventListener('click', startNewChat);
+  document.getElementById('newChatBtn').addEventListener('click', startNewChat);
 
   async function doSend() {
     const question = input.value.trim();
@@ -116,118 +150,38 @@
     input.style.height = 'auto';
     sendBtn.disabled = true;
 
-    // Hide welcome message on first send
     document.getElementById('welcomeMsg')?.remove();
 
     appendUserBubble(question);
-    const thinkingEl = appendThinking();
+    const assistantElements = createStreamingAssistantBubble();
 
-    try {
-      const res = await chat.send(question, currentConversationId);
-      thinkingEl.remove();
+    let fullAnswer = '';
+    let citations = [];
 
-      currentConversationId = res.conversation_id;
-      titleEl.textContent = question.slice(0, 50) + (question.length > 50 ? '…' : '');
-      metaEl.textContent  = `Conversation #${res.conversation_id}`;
-
-      appendAssistantBubble(res.answer, res.sources || []);
-      loadConversations();
-    } catch (err) {
-      thinkingEl.remove();
-      appendErrorBubble(err.message);
-    }
+    await chat.stream(
+      question,
+      currentConversationId,
+      null,
+      (token) => {
+        fullAnswer += token;
+        assistantElements.bubble.innerHTML = renderMarkdown(fullAnswer);
+        feed.scrollTop = feed.scrollHeight;
+      },
+      (sources) => {
+        citations = sources || [];
+        renderSourcesUnderBubble(assistantElements.body, citations);
+      },
+      () => {
+        loadConversations();
+        feed.scrollTop = feed.scrollHeight;
+      },
+      (err) => {
+        assistantElements.bubble.innerHTML = `<span style="color:var(--color-error)">⚠️ ${escapeHtml(err.message)}</span>`;
+      }
+    );
   }
 
-  // ---- Bubble builders ----------------------------------------
-  function appendUserBubble(text) {
-    const el = document.createElement('div');
-    el.className = 'message user';
-    el.setAttribute('role', 'article');
-    el.setAttribute('aria-label', 'Your message');
-    el.innerHTML = `
-      <div class="message-avatar" aria-hidden="true">You</div>
-      <div class="message-body">
-        <div class="message-bubble">${escapeHtml(text)}</div>
-        <div class="message-time">${formatDateTime(new Date().toISOString())}</div>
-      </div>`;
-    feed.appendChild(el);
-    scrollToBottom();
-  }
-
-  function appendAssistantBubble(answer, sources) {
-    const isNoContext = answer.includes("I don't have this information");
-    const el = document.createElement('div');
-    el.className = 'message assistant';
-    el.setAttribute('role', 'article');
-    el.setAttribute('aria-label', 'Assistant response');
-
-    const sourcesHtml = sources.length > 0 ? `
-      <div class="sources-section">
-        <div class="sources-label">Sources (${sources.length})</div>
-        <div class="sources-list">
-          ${sources.map(s => `
-            <span class="source-badge" title="Score: ${s.score}">
-              📄 ${escapeHtml(s.filename)}${s.page_number ? ` p.${s.page_number}` : ''}
-              <span class="score">${(s.score * 100).toFixed(0)}%</span>
-            </span>`).join('')}
-        </div>
-      </div>` : '';
-
-    const noContextBanner = isNoContext ? `
-      <div class="no-context-banner">
-        ⚠️ The answer was not found in your documents. Try uploading relevant files.
-      </div>` : '';
-
-    el.innerHTML = `
-      <div class="message-avatar" aria-hidden="true">AI</div>
-      <div class="message-body">
-        <div class="message-bubble">${renderMarkdown(answer)}</div>
-        ${noContextBanner}
-        ${sourcesHtml}
-        <div class="message-time">${formatDateTime(new Date().toISOString())}</div>
-      </div>`;
-    feed.appendChild(el);
-    scrollToBottom();
-  }
-
-  function appendThinking() {
-    const el = document.createElement('div');
-    el.className = 'message assistant';
-    el.setAttribute('aria-label', 'Assistant is thinking');
-    el.innerHTML = `
-      <div class="message-avatar" aria-hidden="true">AI</div>
-      <div class="message-body">
-        <div class="message-bubble">
-          <div class="thinking" aria-label="Loading">
-            <span></span><span></span><span></span>
-          </div>
-        </div>
-      </div>`;
-    feed.appendChild(el);
-    scrollToBottom();
-    return el;
-  }
-
-  function appendErrorBubble(message) {
-    const el = document.createElement('div');
-    el.className = 'message assistant';
-    el.innerHTML = `
-      <div class="message-avatar" aria-hidden="true">AI</div>
-      <div class="message-body">
-        <div class="message-bubble" style="border-color:var(--color-danger);">
-          <span style="color:var(--color-danger);">⚠️ Error: ${escapeHtml(message)}</span>
-        </div>
-      </div>`;
-    feed.appendChild(el);
-    scrollToBottom();
-  }
-
-  function scrollToBottom() {
-    feed.scrollTop = feed.scrollHeight;
-  }
-
-  // ---- New chat ------------------------------------------------
-  function resetChat() {
+  function startNewChat() {
     currentConversationId = null;
     titleEl.textContent = 'New Conversation';
     metaEl.textContent  = 'Ask anything about your documents';
@@ -236,56 +190,135 @@
         <div class="message-avatar" aria-hidden="true">AI</div>
         <div class="message-body">
           <div class="message-bubble">
-            <p><strong>Hello! I'm your Documentation Assistant.</strong></p>
-            <p>Ask me anything about your uploaded documents.</p>
+            <p><strong>Started a new conversation.</strong></p>
+            <p>Ask anything about your indexed documents or web pages.</p>
           </div>
         </div>
       </div>`;
-    input.value = '';
-    sendBtn.disabled = true;
     loadConversations();
   }
 
-  document.getElementById('newChatBtn').addEventListener('click', resetChat);
-  document.getElementById('clearChatBtn').addEventListener('click', resetChat);
-
-  // ---- Load conversation history into sidebar -----------------
-  async function loadConversations() {
-    const container = document.getElementById('conversationsList');
-    try {
-      const convs = await chat.listConversations(0, 20);
-      if (!convs.length) {
-        container.innerHTML = `<div style="padding:var(--space-2) var(--space-3);font-size:var(--text-xs);color:var(--sidebar-text);opacity:0.5;">No history yet</div>`;
-        return;
-      }
-      container.innerHTML = convs.map(c => `
-        <button class="nav-link ${c.id === currentConversationId ? 'active' : ''}"
-                data-conv-id="${c.id}"
-                style="width:100%;text-align:left;border:none;cursor:pointer;font-size:var(--text-xs);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;"
-                title="${escapeHtml(c.title || 'Untitled')}">
-          <span class="nav-icon">💬</span>
-          ${escapeHtml((c.title || 'Untitled').slice(0, 28))}
-        </button>`).join('');
-
-      container.querySelectorAll('[data-conv-id]').forEach(btn => {
-        btn.addEventListener('click', () => loadConversation(Number(btn.dataset.convId)));
-      });
-    } catch { /* sidebar history is non-critical */ }
+  function appendUserBubble(text) {
+    const el = document.createElement('div');
+    el.className = 'message user';
+    el.innerHTML = `
+      <div class="message-avatar" aria-hidden="true">You</div>
+      <div class="message-body">
+        <div class="message-bubble">${escapeHtml(text)}</div>
+      </div>`;
+    feed.appendChild(el);
+    feed.scrollTop = feed.scrollHeight;
   }
 
-  async function loadConversation(id) {
-    try {
-      const conv = await chat.getConversation(id);
-      currentConversationId = id;
-      titleEl.textContent = conv.title || `Conversation #${id}`;
-      metaEl.textContent  = `${conv.messages.length} messages`;
-      feed.innerHTML = '';
+  function createStreamingAssistantBubble() {
+    const el = document.createElement('div');
+    el.className = 'message assistant';
+    el.innerHTML = `
+      <div class="message-avatar" aria-hidden="true">AI</div>
+      <div class="message-body">
+        <div class="message-bubble"><span class="cursor-pulse">▌</span></div>
+      </div>`;
+    feed.appendChild(el);
+    feed.scrollTop = feed.scrollHeight;
 
-      conv.messages.forEach(m => {
-        if (m.role === 'user')      appendUserBubble(m.content);
-        else appendAssistantBubble(m.content, m.sources || []);
+    return {
+      container: el,
+      body: el.querySelector('.message-body'),
+      bubble: el.querySelector('.message-bubble')
+    };
+  }
+
+  function renderSourcesUnderBubble(bodyEl, sources) {
+    if (!sources || sources.length === 0) return;
+
+    const sourcesEl = document.createElement('div');
+    sourcesEl.className = 'message-sources';
+    sourcesEl.innerHTML = `
+      <div class="sources-label">Sources used (${sources.length})</div>
+      <div class="sources-list">
+        ${sources.map(s => `
+          <div class="source-badge" title="Score: ${s.score}">
+            <span class="source-icon">📄</span>
+            <span class="source-name">${escapeHtml(s.filename)}</span>
+            ${s.page_number ? `<span class="source-page">p. ${s.page_number}</span>` : ''}
+          </div>
+        `).join('')}
+      </div>`;
+    bodyEl.appendChild(sourcesEl);
+  }
+
+  async function loadConversations() {
+    const listEl = document.getElementById('conversationsList');
+    try {
+      const convs = await chat.listConversations(0, 30);
+      if (convs.length === 0) {
+        listEl.innerHTML = '<div style="padding:var(--space-2) var(--space-3); font-size:var(--text-xs); color:var(--color-text-muted);">No past chats</div>';
+        return;
+      }
+
+      listEl.innerHTML = convs.map(c => `
+        <div class="nav-link ${c.id === currentConversationId ? 'active' : ''}"
+             data-id="${c.id}"
+             style="cursor:pointer; display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
+          <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:140px;" title="${escapeHtml(c.title || 'Chat')}">
+            ${escapeHtml(c.title || 'Chat')}
+          </span>
+          <button class="btn-delete-conv" data-id="${c.id}" style="background:none; border:none; color:var(--color-text-muted); cursor:pointer; font-size:11px;">✕</button>
+        </div>
+      `).join('');
+
+      listEl.querySelectorAll('.nav-link').forEach(item => {
+        item.addEventListener('click', (e) => {
+          if (e.target.classList.contains('btn-delete-conv')) return;
+          loadConversationById(parseInt(item.dataset.id));
+        });
       });
 
+      listEl.querySelectorAll('.btn-delete-conv').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const convId = parseInt(btn.dataset.id);
+          try {
+            await chat.deleteConversation(convId);
+            if (currentConversationId === convId) startNewChat();
+            else loadConversations();
+          } catch (err) {
+            toast(err.message, 'error');
+          }
+        });
+      });
+
+    } catch (err) {
+      console.warn("Could not load conversations", err);
+    }
+  }
+
+  async function loadConversationById(id) {
+    try {
+      const conv = await chat.getConversation(id);
+      currentConversationId = conv.id;
+      titleEl.textContent = conv.title || `Conversation #${conv.id}`;
+      metaEl.textContent  = `Started ${formatDateTime(conv.created_at)}`;
+
+      feed.innerHTML = '';
+      conv.messages.forEach(m => {
+        if (m.role === 'user') {
+          appendUserBubble(m.content);
+        } else {
+          const el = document.createElement('div');
+          el.className = 'message assistant';
+          el.innerHTML = `
+            <div class="message-avatar" aria-hidden="true">AI</div>
+            <div class="message-body">
+              <div class="message-bubble">${renderMarkdown(m.content)}</div>
+            </div>`;
+          feed.appendChild(el);
+          if (m.sources && m.sources.length > 0) {
+            renderSourcesUnderBubble(el.querySelector('.message-body'), m.sources);
+          }
+        }
+      });
+      feed.scrollTop = feed.scrollHeight;
       loadConversations();
     } catch (err) {
       toast(err.message, 'error');

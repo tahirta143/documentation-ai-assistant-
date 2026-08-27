@@ -28,3 +28,9 @@ google-genai
 pytest
 pytest-asyncio
 httpx
+
+# Phase 14 — Auth
+pyjwt
+bcrypt
+passlib
+email-validator

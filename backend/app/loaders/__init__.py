@@ -2,11 +2,11 @@
 Loader factory.
 
 Usage:
-    from app.loaders import get_loader, LoadedDocument
+    from app.loaders import load_document, LoadedDocument
 
-    doc = get_loader("pdf").load("path/to/file.pdf")
+    doc = load_document("path/to/file.pdf", "pdf")
     # doc.pages  → list of (page_number, text) for PDFs
-    # doc.text   → single concatenated string for MD/TXT
+    # doc.full_text → concatenated clean string
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class LoadedDocument:
     """Unified output from any loader."""
     file_type: str
-    # For PDFs: one entry per page.  For MD/TXT: a single entry with page_number=1.
+    # For PDFs: one entry per page. For MD/TXT/URL: a single entry with page_number=1.
     pages: list[tuple[int, str]] = field(default_factory=list)
 
     @property
@@ -35,15 +35,15 @@ def load_document(file_path: str | Path, file_type: str) -> LoadedDocument:
     """Dispatch to the right loader based on *file_type* and return a LoadedDocument.
 
     Args:
-        file_path: Absolute or relative path to the file on disk.
-        file_type: One of 'pdf', 'md', 'txt'.
+        file_path: Absolute or relative path to the file on disk (or URL).
+        file_type: One of 'pdf', 'md', 'txt', 'url'.
 
     Returns:
         LoadedDocument with .pages populated.
 
     Raises:
         ValueError: For unsupported file types.
-        FileNotFoundError: If the file doesn't exist.
+        FileNotFoundError: If the local file doesn't exist.
     """
     ext = file_type.lower().lstrip(".")
 
@@ -69,7 +69,21 @@ def load_document(file_path: str | Path, file_type: str) -> LoadedDocument:
         text = clean_text(load_txt(file_path))
         return LoadedDocument(file_type="txt", pages=[(1, text)])
 
+    elif ext == "url":
+        from app.loaders.url_loader import load_url
+        from app.utils.text_cleaner import clean_text
+
+        # If file_path is stored file with URL contents or direct url string
+        url_str = str(file_path)
+        if Path(file_path).exists():
+            # If path points to a saved file containing the scraped markdown/text
+            text = Path(file_path).read_text(encoding="utf-8", errors="ignore")
+        else:
+            _, text = load_url(url_str)
+        cleaned = clean_text(text)
+        return LoadedDocument(file_type="url", pages=[(1, cleaned)])
+
     else:
         raise ValueError(
-            f"Unsupported file type '{ext}'. Supported: pdf, md, txt"
+            f"Unsupported file type '{ext}'. Supported: pdf, md, txt, url"
         )

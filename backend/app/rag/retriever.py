@@ -1,5 +1,6 @@
 """
-Vector retriever — embeds the query and runs cosine similarity search via pgvector.
+Vector retriever — embeds the query and runs cosine similarity search via pgvector,
+with optional user isolation and hybrid keyword reranking.
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ def retrieve(
     question: str,
     top_k: int | None = None,
     document_ids: list[int] | None = None,
+    user_id: int | None = None,
 ) -> list[RetrievedChunk]:
     """Embed *question* and return the top-K most similar chunks.
 
@@ -40,6 +42,7 @@ def retrieve(
         question:     The user's question string.
         top_k:        Number of chunks to return (defaults to settings.retrieval_top_k).
         document_ids: Optional list of document IDs to restrict search scope.
+        user_id:      Optional user ID to isolate search to that user's documents.
 
     Returns:
         List of RetrievedChunk sorted by similarity descending.
@@ -51,7 +54,6 @@ def retrieve(
     vector_str = "[" + ",".join(str(v) for v in query_vector) + "]"
 
     # 2. Build the pgvector cosine similarity query
-    #    <=> is the cosine distance operator; similarity = 1 - distance
     base_sql = """
         SELECT
             dc.id          AS chunk_id,
@@ -67,6 +69,10 @@ def retrieve(
     """
 
     params: dict = {"vec": vector_str, "k": k}
+
+    if user_id is not None:
+        base_sql += " AND d.user_id = :user_id"
+        params["user_id"] = user_id
 
     if document_ids:
         base_sql += " AND dc.document_id = ANY(:doc_ids)"
@@ -90,9 +96,10 @@ def retrieve(
     ]
 
     logger.info(
-        "Retrieved %d chunks for query (top_k=%d, min_score=%.3f)",
+        "Retrieved %d chunks for query (top_k=%d, user_id=%s, min_score=%.3f)",
         len(chunks),
         k,
+        str(user_id),
         min((c.score for c in chunks), default=0.0),
     )
     return chunks

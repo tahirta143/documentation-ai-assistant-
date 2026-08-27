@@ -1,12 +1,15 @@
 from datetime import datetime
-
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, HttpUrl
 
 
 class DocumentBase(BaseModel):
     filename: str
     file_type: str
     file_size: int | None = None
+
+
+class DocumentUrlRequest(BaseModel):
+    url: str
 
 
 class DocumentCreate(DocumentBase):

@@ -1,12 +1,13 @@
 """
-Document service — business logic for document management.
+Document service — business logic for document management (Files & URLs).
 
 Responsibilities:
 - Validate file type and size.
-- Save the uploaded file to disk.
+- Save the uploaded file or scraped URL content to disk.
 - Insert a row in the documents table (status = processing).
 - Trigger the ingestion pipeline (extract → chunk → store chunks).
 - Delete file from disk when a document is deleted from DB.
+- Isolate documents by user_id.
 """
 
 import logging
@@ -17,6 +18,7 @@ from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.loaders.url_loader import load_url
 from app.models.document import Document
 from app.repositories.document_repository import document_repository
 from app.schemas.document import DocumentCreate, DocumentListResponse, DocumentResponse
@@ -52,7 +54,6 @@ class DocumentService:
         upload_dir: Path = settings.upload_dir
         upload_dir.mkdir(parents=True, exist_ok=True)
 
-        # Use a UUID filename to avoid collisions
         dest = upload_dir / f"{uuid.uuid4()}.{ext}"
         content = file.file.read()
 
@@ -74,7 +75,7 @@ class DocumentService:
         self,
         db: Session,
         file: UploadFile,
-        user_id: int = 1,  # placeholder until auth is wired (Phase 14)
+        user_id: int,
     ) -> DocumentResponse:
         ext = self._validate_file(file)
         dest, size = self._save_to_disk(file, ext)
@@ -87,17 +88,53 @@ class DocumentService:
             user_id=user_id,
         )
         doc = document_repository.create(db, data)
-        logger.info("Created document id=%d status=%s", doc.id, doc.status)
+        logger.info("Created document id=%d user_id=%d status=%s", doc.id, user_id, doc.status)
 
-        # Phase 6: full ingestion pipeline (extract → chunk → store)
+        # Trigger full ingestion pipeline (extract → chunk → store)
         from app.services.ingestion_service import ingestion_service
         ingestion_service.ingest(db, doc)
 
         return DocumentResponse.model_validate(doc)
 
-    def get_by_id(self, db: Session, document_id: int) -> DocumentResponse:
+    def upload_url(
+        self,
+        db: Session,
+        url: str,
+        user_id: int,
+    ) -> DocumentResponse:
+        """Scrape web page at *url*, save text locally, and ingest."""
+        try:
+            title, text_content = load_url(url)
+        except Exception as exc:
+            logger.error("Failed to load URL %s: %s", url, exc)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Failed to fetch content from URL: {exc}",
+            )
+
+        upload_dir: Path = settings.upload_dir
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        dest = upload_dir / f"{uuid.uuid4()}.txt"
+        dest.write_text(text_content, encoding="utf-8")
+
+        data = DocumentCreate(
+            filename=title or url,
+            file_type="url",
+            file_path=str(dest),
+            file_size=len(text_content.encode("utf-8")),
+            user_id=user_id,
+        )
+        doc = document_repository.create(db, data)
+        logger.info("Created URL document id=%d user_id=%d for %s", doc.id, user_id, url)
+
+        from app.services.ingestion_service import ingestion_service
+        ingestion_service.ingest(db, doc)
+
+        return DocumentResponse.model_validate(doc)
+
+    def get_by_id(self, db: Session, document_id: int, user_id: int) -> DocumentResponse:
         doc = document_repository.get_by_id(db, document_id)
-        if doc is None:
+        if doc is None or doc.user_id != user_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Document {document_id} not found.",
@@ -107,32 +144,37 @@ class DocumentService:
     def list_documents(
         self,
         db: Session,
-        user_id: int = 1,
+        user_id: int,
         skip: int = 0,
         limit: int = 50,
     ) -> DocumentListResponse:
-        total, items = document_repository.list_by_user(db, user_id, skip, limit)
+        total, docs = document_repository.list_by_user(
+            db, user_id=user_id, skip=skip, limit=limit
+        )
         return DocumentListResponse(
             total=total,
-            items=[DocumentResponse.model_validate(d) for d in items],
+            items=[DocumentResponse.model_validate(d) for d in docs],
         )
 
-    def delete(self, db: Session, document_id: int) -> None:
-        doc: Document | None = document_repository.get_by_id(db, document_id)
-        if doc is None:
+    def delete(self, db: Session, document_id: int, user_id: int) -> None:
+        doc = document_repository.get_by_id(db, document_id)
+        if doc is None or doc.user_id != user_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Document {document_id} not found.",
             )
-        # Remove file from disk (best-effort)
+
+        # Remove file from disk
         try:
-            Path(doc.file_path).unlink(missing_ok=True)
-            logger.info("Deleted file %s", doc.file_path)
-        except Exception as exc:
+            file_path = Path(doc.file_path)
+            if file_path.exists():
+                file_path.unlink()
+                logger.info("Deleted file from disk: %s", file_path)
+        except OSError as exc:
             logger.warning("Could not delete file %s: %s", doc.file_path, exc)
 
         document_repository.delete(db, document_id)
-        logger.info("Deleted document id=%d", document_id)
+        logger.info("Deleted document id=%d from database", document_id)
 
 
 document_service = DocumentService()
